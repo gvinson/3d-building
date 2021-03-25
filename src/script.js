@@ -202,9 +202,10 @@ const tick = () => {
         // use the cameraSplinePositionIndex number to get the next point on the spline
         const camPos = cameraSpline.getPointAt(cameraSplinePositionIndex / stepsInteger);
 
-        camera.position.x = camPos.x;
-        camera.position.y = camPos.y;
-        camera.position.z = camPos.z;
+        controls.target = new THREE.Vector3(camPos.x, camPos.y, camPos.z);
+        // camera.position.x = camPos.x;
+        // camera.position.y = camPos.y;
+        // camera.position.z = camPos.z;
     }
 
     // Update controls
