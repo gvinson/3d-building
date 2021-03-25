@@ -34,9 +34,8 @@ const sizes = {
 /**
  * Camera
  */
-// Base camera
 const camera = new THREE.PerspectiveCamera(75, sizes.width / sizes.height, 0.1, 100)
-camera.position.set(0,0,0);
+camera.position.set(-4, 1, 5.5);
 scene.add(camera);
 const cameraFolder = gui.addFolder('Camera');
 cameraFolder.add(camera.position, 'x').min(-100).max(100).step(0.01);
@@ -47,15 +46,6 @@ let cameraSpline = null;
 
 // Controls
 const controls = new OrbitControls(camera, canvas)
-controls.target.set(0, 0, 0);
-// controls.enableDamping = true;   //damping
-// controls.dampingFactor = 0.025;
-// Limit up/down
-// controls.maxPolarAngle = Math.PI / 2.25; // down
-// controls.minPolarAngle = Math.PI / 3;  // up
-// Limit left/right
-// controls.minAzimuthAngle = -Math.PI / 2; // radians
-// controls.maxAzimuthAngle = Math.PI / 2; // radians
 
 /**
  * Renderer
@@ -160,6 +150,7 @@ gltfLoader.load('/models/model-with-spline.glb',
         });
 
         cameraSpline = new THREE.CatmullRomCurve3(cameraSplinePoints);
+        cameraSpline.arcLengthDivisions = 10;
 
         updateAllMaterials();
     },
@@ -181,37 +172,43 @@ window.addEventListener('resize', () =>
 });
 
 // Spline movement listener
-let camPosIndex = 0;
+let cameraSplinePositionIndex = 0;
+let stepsInteger = 60;
 canvas.addEventListener('wheel', (e) => {
-    camPosIndex += -Math.sign(e.deltaY) * 0.1;
-    if (camPosIndex < 0) {
-        camPosIndex = 0;
+    // Every scroll, increment a number
+    cameraSplinePositionIndex += -Math.sign(e.deltaY) * 0.1;
+
+    if (cameraSplinePositionIndex > stepsInteger || cameraSplinePositionIndex < 0) {
+        cameraSplinePositionIndex = 0;
     }
+});
+
+canvas.addEventListener('click', () => {
+    console.log(camera.position);
+    console.log(camera.rotation);
+    console.log(camera.quaternion);
+    console.log("====")
 });
 
 /**
  * Animate
  */
-const tick = () => {
 
+window.camera = camera;
+
+const tick = () => {
     // Update camera around spline
     if (camera && cameraSplinePoints.length > 0 && cameraSpline) {
-        const camPos = cameraSpline.getPoint(camPosIndex / 100);
-        const camRot = cameraSpline.getTangent(camPosIndex / 100);
+        // use the cameraSplinePositionIndex number to get the next point on the spline
+        const camPos = cameraSpline.getPointAt(cameraSplinePositionIndex / stepsInteger);
 
         camera.position.x = camPos.x;
         camera.position.y = camPos.y;
         camera.position.z = camPos.z;
-
-        camera.rotation.x = camRot.x;
-        camera.rotation.y = camRot.y;
-        camera.rotation.z = camRot.z;
-
-        camera.lookAt(cameraSpline.getPoint((camPosIndex+1) / 100));
     }
 
     // Update controls
-    controls.update()
+    controls.update();
 
     // Render
     renderer.render(scene, camera)
