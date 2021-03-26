@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader";
 import * as dat from 'dat.gui'
+import {TransformControls} from "three/examples/jsm/controls/TransformControls";
 
 /**
  * Base
@@ -35,7 +36,7 @@ const sizes = {
  * Camera
  */
 const camera = new THREE.PerspectiveCamera(75, sizes.width / sizes.height, 0.1, 100)
-camera.position.set(-4, 1, 5.5);
+camera.position.set(-10, 1.44, -16);
 scene.add(camera);
 const cameraFolder = gui.addFolder('Camera');
 cameraFolder.add(camera.position, 'x').min(-100).max(100).step(0.01);
@@ -44,8 +45,12 @@ cameraFolder.add(camera.position, 'z').min(-100).max(100).step(0.01);
 const cameraSplinePoints = [];
 let cameraSpline = null;
 
-// Controls
-const controls = new OrbitControls(camera, canvas)
+/**
+ * Controls
+ */
+const controls = new OrbitControls(camera, canvas);
+controls.maxPolarAngle = Math.PI / 2; // down
+controls.minPolarAngle = Math.PI / 3;  // up
 
 /**
  * Renderer
@@ -137,15 +142,27 @@ debugObject.envMapIntensity = 1.28;
 gui.add(debugObject, 'envMapIntensity').min(0).max(10).step(0.001).onChange(updateAllMaterials)
 
 /**
+ * Raycaster
+*/
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let currentIntersect = null;
+const interactables = [];
+
+/**
  * Models
  */
-gltfLoader.load('/models/model-with-spline.glb',
+gltfLoader.load('/models/model-with-spline2.glb',
     (gltf) => {
         scene.add(gltf.scene);
 
         scene.traverse((child) => {
             if (child.name.includes('Spline_Point')) {
                 cameraSplinePoints.push(child.position);
+            } else if (child.name.includes('MacBook') || child.name.includes('iMac')) {
+                child.children.forEach((child2) => {
+                    interactables.push(child2);
+                })
             }
         });
 
@@ -153,6 +170,8 @@ gltfLoader.load('/models/model-with-spline.glb',
         cameraSpline.arcLengthDivisions = 10;
 
         updateAllMaterials();
+
+        tick();
     },
 );
 
@@ -171,53 +190,78 @@ window.addEventListener('resize', () =>
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 });
 
-// Spline movement listener
-let cameraSplinePositionIndex = 0;
-let stepsInteger = 60;
-canvas.addEventListener('wheel', (e) => {
-    // Every scroll, increment a number
-    cameraSplinePositionIndex += -Math.sign(e.deltaY) * 0.1;
+/**
+ * Mouse event listener
+ */
+let didClick = false;
+window.addEventListener('click', (e) => {
+    console.dir(currentIntersect);
+    console.dir(interactables);
+    // normalize x from -1 to 1 - left -> right
+    mouse.x = ( e.clientX / sizes.width ) * 2 - 1;
+    // normalize y - need to invert because we want +1 at top of screen, -1 at bottom
+    mouse.y = -(e.clientY / sizes.height * 2 - 1);
 
-    if (cameraSplinePositionIndex > stepsInteger || cameraSplinePositionIndex < 0) {
-        cameraSplinePositionIndex = 0;
-    }
+    didClick = true;
 });
 
-canvas.addEventListener('click', () => {
-    console.log(camera.position);
-    console.log(camera.rotation);
-    console.log(camera.quaternion);
-    console.log("====")
+/**
+ * Spline movement listener
+ */
+let cameraSplinePositionIndex = 0;
+let stepsInteger = 50;
+// Every scroll, increment a number
+canvas.addEventListener('wheel', (e) => {
+    const index = -Math.sign(e.deltaY) * 0.1;
+
+    if (cameraSplinePositionIndex + index > stepsInteger || cameraSplinePositionIndex + index < 0) {
+        cameraSplinePositionIndex = 0;
+    } else {
+        cameraSplinePositionIndex += index;
+    }
 });
 
 /**
  * Animate
  */
-
-window.camera = camera;
-
+let firstRender = true;
 const tick = () => {
     // Update camera around spline
     if (camera && cameraSplinePoints.length > 0 && cameraSpline) {
-        // use the cameraSplinePositionIndex number to get the next point on the spline
-        const camPos = cameraSpline.getPointAt(cameraSplinePositionIndex / stepsInteger);
+        // get next point on spline
+        const equalDistanceValue = cameraSpline.getUtoTmapping(cameraSplinePositionIndex / stepsInteger);
+        const camPos = cameraSpline.getPoint(equalDistanceValue);
 
-        controls.target = new THREE.Vector3(camPos.x, camPos.y, camPos.z);
-        // camera.position.x = camPos.x;
-        // camera.position.y = camPos.y;
-        // camera.position.z = camPos.z;
+        if (firstRender) {
+            // set camera to first position on first render
+            camera.position.copy(cameraSplinePoints[0]);
+        } else {
+            // move control target to move camera position
+            // we do it this way instead of setting camera.position so we can maintain the orbit controls rotations/pans
+            controls.target.set(camPos.x, camPos.y, camPos.z);
+        }
     }
 
     // Update controls
     controls.update();
 
+    // Raycaster Test
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(interactables);
+    for(const intersect of intersects) {
+        if (didClick) {
+            alert(intersect.object.parent.name);
+            didClick = false;
+        }
+    }
+
     // Render
     renderer.render(scene, camera)
+
+    firstRender = false;
 
     // Call tick again on the next frame
     window.requestAnimationFrame(tick)
 }
-
-tick()
 
 
