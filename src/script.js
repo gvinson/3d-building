@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader";
 import * as dat from 'dat.gui'
+import THREEx from './THREEx.KeyboardState.js';
 
 /**
  * Base
@@ -41,11 +42,10 @@ const cameraFolder = gui.addFolder('Camera');
 cameraFolder.add(camera.position, 'x').min(-100).max(100).step(0.01);
 cameraFolder.add(camera.position, 'y').min(-100).max(100).step(0.01);
 cameraFolder.add(camera.position, 'z').min(-100).max(100).step(0.01);
-const cameraSplinePoints = [];
-let cameraSpline = null;
 
 // Controls
-const controls = new OrbitControls(camera, canvas)
+const controls = new OrbitControls(camera, canvas);
+controls.target = new THREE.Vector3(0, 1, 0);
 
 /**
  * Renderer
@@ -79,7 +79,6 @@ gui.add(renderer, 'toneMappingExposure').min(0).max(10).step(0.001)
 
 const pmremGenerator = new THREE.PMREMGenerator( renderer );
 pmremGenerator.compileEquirectangularShader();
-
 
 /**
  * Lights
@@ -142,16 +141,6 @@ gui.add(debugObject, 'envMapIntensity').min(0).max(10).step(0.001).onChange(upda
 gltfLoader.load('/models/model-with-spline.glb',
     (gltf) => {
         scene.add(gltf.scene);
-
-        scene.traverse((child) => {
-            if (child.name.includes('Spline_Point')) {
-                cameraSplinePoints.push(child.position);
-            }
-        });
-
-        cameraSpline = new THREE.CatmullRomCurve3(cameraSplinePoints);
-        cameraSpline.arcLengthDivisions = 10;
-
         updateAllMaterials();
     },
 );
@@ -171,18 +160,6 @@ window.addEventListener('resize', () =>
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 });
 
-// Spline movement listener
-let cameraSplinePositionIndex = 0;
-let stepsInteger = 60;
-canvas.addEventListener('wheel', (e) => {
-    // Every scroll, increment a number
-    cameraSplinePositionIndex += -Math.sign(e.deltaY) * 0.1;
-
-    if (cameraSplinePositionIndex > stepsInteger || cameraSplinePositionIndex < 0) {
-        cameraSplinePositionIndex = 0;
-    }
-});
-
 canvas.addEventListener('click', () => {
     console.log(camera.position);
     console.log(camera.rotation);
@@ -190,22 +167,35 @@ canvas.addEventListener('click', () => {
     console.log("====")
 });
 
+var keyboard = new THREEx.KeyboardState();
+var clock = new THREE.Clock();
+//controls.enabled = false;
+controls.enableZoom = false;
+controls.enablePan = false;
 /**
  * Animate
  */
-
 window.camera = camera;
-
 const tick = () => {
-    // Update camera around spline
-    if (camera && cameraSplinePoints.length > 0 && cameraSpline) {
-        // use the cameraSplinePositionIndex number to get the next point on the spline
-        const camPos = cameraSpline.getPointAt(cameraSplinePositionIndex / stepsInteger);
+    const delta = clock.getDelta();
 
-        controls.target = new THREE.Vector3(camPos.x, camPos.y, camPos.z);
-        // camera.position.x = camPos.x;
-        // camera.position.y = camPos.y;
-        // camera.position.z = camPos.z;
+    if ( keyboard.pressed("W") ) {
+        camera.translateZ( -delta );
+    }
+    if ( keyboard.pressed("S") ) {
+        camera.translateZ(  delta );
+    }
+    if ( keyboard.pressed("Q") ) {
+        camera.translateX( -delta );
+    }
+    if ( keyboard.pressed("E") ) {;
+        camera.translateX(  delta );
+    }
+
+    if ( keyboard.pressed("Z") )
+    {
+        camera.position.set(-4, 1, 5.5);
+        camera.rotation.set(0,0,0);
     }
 
     // Update controls
