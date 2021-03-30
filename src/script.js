@@ -1,28 +1,37 @@
-import './style.css'
-import * as THREE from 'three'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import './style.css';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader";
-import * as dat from 'dat.gui'
-import {TransformControls} from "three/examples/jsm/controls/TransformControls";
+import * as dat from 'dat.gui';
 
 /**
  * Base
  */
 // Debug
-const gui = new dat.GUI()
-const debugObject = {}
+const gui = new dat.GUI();
+const debugObject = {};
 
 // Canvas
-const canvas = document.querySelector('canvas.webgl')
+const canvas = document.querySelector('canvas.webgl');
 
 // Scene
-const scene = new THREE.Scene()
+const scene = new THREE.Scene();
+const textureLoader = new THREE.TextureLoader();
+const bgTexture = textureLoader.load('/textures/envMap.jpg');
+const lightMap = textureLoader.load('/textures/lightMap.png');
+lightMap.flipY = false;
+lightMap.generateMipmaps = true;
+lightMap.minFilter = THREE.LinearMipMapLinearFilter;
+lightMap.magFilter = THREE.NearestFilter;
+lightMap.encoding = THREE.sRGBEncoding;
+scene.background = bgTexture;
+scene.environment = bgTexture;
 
 /**
  * Loaders
  */
-const gltfLoader = new GLTFLoader()
+const gltfLoader = new GLTFLoader();
 
 /**
  * Sizes
@@ -30,20 +39,23 @@ const gltfLoader = new GLTFLoader()
 const sizes = {
     width: window.innerWidth,
     height: window.innerHeight
-}
+};
 
 /**
  * Camera
  */
-const camera = new THREE.PerspectiveCamera(75, sizes.width / sizes.height, 0.1, 100)
+const camera = new THREE.PerspectiveCamera(75, sizes.width / sizes.height, 0.1, 100);
 camera.position.set(-10, 1.44, -16);
 scene.add(camera);
 const cameraFolder = gui.addFolder('Camera');
 cameraFolder.add(camera.position, 'x').min(-100).max(100).step(0.01);
 cameraFolder.add(camera.position, 'y').min(-100).max(100).step(0.01);
 cameraFolder.add(camera.position, 'z').min(-100).max(100).step(0.01);
+
 const cameraSplinePoints = [];
 let cameraSpline = null;
+let cameraSplinePositionIndex = 0;
+let stepsInteger = 50;
 
 /**
  * Controls
@@ -51,6 +63,8 @@ let cameraSpline = null;
 const controls = new OrbitControls(camera, canvas);
 controls.maxPolarAngle = Math.PI / 2; // down
 controls.minPolarAngle = Math.PI / 3;  // up
+controls.enableDamping = false;
+controls.dampingFactor = 0.25;
 
 /**
  * Renderer
@@ -58,15 +72,16 @@ controls.minPolarAngle = Math.PI / 3;  // up
 const renderer = new THREE.WebGLRenderer({
     canvas: canvas,
     antialias: true
-})
-renderer.physicallyCorrectLights = true
-renderer.outputEncoding = THREE.sRGBEncoding
-renderer.toneMapping = THREE.ReinhardToneMapping
-renderer.toneMappingExposure = 0.4;
-renderer.shadowMap.enabled = true
-renderer.shadowMap.type = THREE.PCFSoftShadowMap
-renderer.setSize(sizes.width, sizes.height)
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+});
+renderer.physicallyCorrectLights = true;
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ReinhardToneMapping;
+renderer.toneMappingExposure = 0.2;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+renderer.setSize(sizes.width, sizes.height);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 gui
     .add(renderer, 'toneMapping', {
         No: THREE.NoToneMapping,
@@ -75,12 +90,11 @@ gui
         Cineon: THREE.CineonToneMapping,
         ACESFilmic: THREE.ACESFilmicToneMapping
     })
-    .onFinishChange(() =>
-    {
-        renderer.toneMapping = Number(renderer.toneMapping)
+    .onFinishChange(() => {
+        renderer.toneMapping = Number(renderer.toneMapping);
         updateAllMaterials()
-    })
-gui.add(renderer, 'toneMappingExposure').min(0).max(10).step(0.001)
+    });
+gui.add(renderer, 'toneMappingExposure').min(0).max(10).step(0.001);
 
 const pmremGenerator = new THREE.PMREMGenerator( renderer );
 pmremGenerator.compileEquirectangularShader();
@@ -89,42 +103,45 @@ pmremGenerator.compileEquirectangularShader();
 /**
  * Lights
  */
-const topLight = new THREE.DirectionalLight(0xffffff, 27);
-topLight.position.set(2, 2.7, -1);
-scene.add(topLight);
-const topLightFolder = gui.addFolder('Top Light');
-topLightFolder.add(topLight.position, 'x').min(-5).max(10);
-topLightFolder.add(topLight.position, 'y').min(-5).max(10);
-topLightFolder.add(topLight.position, 'z').min(-5).max(10);
-topLightFolder.add(topLight, 'intensity').min(0).max(100).step(0.01);
+const hemiLight = new THREE.HemisphereLight(0xffeeb1, 0x080820, 0);
+const hemiMaxIntensity = 33.5;
+scene.add(hemiLight);
+const hemiFolder = gui.addFolder('Hemisphere Light');
+hemiFolder.add(hemiLight, 'intensity').min(0).max(100).step(0.1);
 
-const sideLight = new THREE.RectAreaLight(0xffffff, 4.9, 10, 20);
-sideLight.position.set(0, 0, 5);
-scene.add(sideLight);
-const sideLightFolder = gui.addFolder('Side Light');
-sideLightFolder.add(sideLight, 'width').min(0).max(100).step(1);
-sideLightFolder.add(sideLight, 'height').min(0).max(100).step(1);
-sideLightFolder.add(sideLight.position, 'x').min(-5).max(10);
-sideLightFolder.add(sideLight.position, 'y').min(-5).max(10);
-sideLightFolder.add(sideLight.position, 'z').min(-5).max(10);
-sideLightFolder.add(sideLight, 'intensity').min(0).max(100).step(0.01);
+const mainLight = new THREE.RectAreaLight(0xffffff, 0, 50, 100);
+const mainLightMaxIntensity = 11;
+mainLight.position.set(-5, 9, -16);
+scene.add(mainLight);
+mainLight.lookAt( 0, -1000, 0 );
+const mainLightFolder = gui.addFolder('Entry Light');
+mainLightFolder.add(mainLight.position, 'x').min(-100).max(100);
+mainLightFolder.add(mainLight.position, 'y').min(-100).max(100);
+mainLightFolder.add(mainLight.position, 'z').min(-100).max(100);
+mainLightFolder.add(mainLight, 'intensity').min(0).max(100).step(0.01);
 
 /**
  * Update all materials
  */
 const updateAllMaterials = () =>
 {
+    lightMap.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
     scene.traverse((child) =>
     {
         if(child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial)
         {
-            child.material.envMapIntensity = debugObject.envMapIntensity
-            child.material.needsUpdate = true
-            child.castShadow = true
-            child.receiveShadow = true
+            child.material.envMapIntensity = debugObject.envMapIntensity;
+            child.material.lightMapIntensity = debugObject.lightMapIntensity;
+            child.material.needsUpdate = true;
+            child.castShadow = true;
+            child.geometry.buffersNeedUpdate = true;
+            child.geometry.uvsNeedUpdate = true;
+            child.material.uniformsNeedUpdate = true;
+            child.receiveShadow = true;
         }
     });
-}
+};
 
 /**
  * Environment map
@@ -138,36 +155,75 @@ newLoader.load( '/textures/3.hdr', function ( texture ) {
     pmremGenerator.dispose();
     environmentMap = envMap;
 });
-debugObject.envMapIntensity = 1.28;
-gui.add(debugObject, 'envMapIntensity').min(0).max(10).step(0.001).onChange(updateAllMaterials)
+debugObject.envMapIntensity = 6.75;
+debugObject.lightMapIntensity = 0;
+gui.add(debugObject, 'envMapIntensity').min(0).max(10).step(0.001).onChange(updateAllMaterials);
+gui.add(debugObject, 'lightMapIntensity').min(0).max(100).step(0.01).onChange(updateAllMaterials);
 
 /**
  * Raycaster
 */
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
-let currentIntersect = null;
+let currentRayIntersect = false;
 const interactables = [];
 
 /**
  * Models
  */
-gltfLoader.load('/models/model-with-spline2.glb',
+gltfLoader.load('/models/model.glb',
     (gltf) => {
         scene.add(gltf.scene);
+        console.dir(gltf);
 
         scene.traverse((child) => {
-            if (child.name.includes('Spline_Point')) {
+
+            // Make lights nice and bright white
+            if (child.name.toLowerCase().includes('light_large')) {
+                child.children.forEach((light) => {
+                    if (light instanceof THREE.Mesh && light.material instanceof THREE.MeshStandardMaterial) {
+                        light.material.emissiveIntensity = 10;
+                    }
+                })
+            }
+
+            // Create camera spline
+            else if (child.name.includes('Spline_Point')) {
                 cameraSplinePoints.push(child.position);
-            } else if (child.name.includes('MacBook') || child.name.includes('iMac')) {
+            }
+
+            // Create array of objects for click interactions (computers)
+            else if (child.name.includes('MacBook') || child.name.includes('iMac')) {
                 child.children.forEach((child2) => {
                     interactables.push(child2);
                 })
             }
+
+            // Add light map to required objects
+            if (child.name.includes('Lightmapped')) {
+                if (child instanceof THREE.Group) {
+                    child.children.forEach((obj) => {
+                        // Get existing `uv` data array
+                        if (obj.geometry.getAttribute('uv') && !obj.geometry.getAttribute('uv2')) {
+                            const uv1Array = obj.geometry.getAttribute("uv").array;
+                            obj.geometry.setAttribute( 'uv2', new THREE.BufferAttribute( uv1Array, 2 ) );
+                        }
+                        obj.material.lightMap = lightMap;
+                    })
+                } else if (child instanceof THREE.Mesh) {
+                    // Get existing `uv` data array
+                    if (child.geometry.getAttribute('uv') && !child.geometry.getAttribute('uv2')) {
+                        const uv1Array = child.geometry.getAttribute("uv").array;
+                        child.geometry.setAttribute( 'uv2', new THREE.BufferAttribute( uv1Array, 2 ) );
+                    }
+                    child.material.lightMap = lightMap;
+                }
+            }
         });
 
+        // Create camera spline
         cameraSpline = new THREE.CatmullRomCurve3(cameraSplinePoints);
-        cameraSpline.arcLengthDivisions = 10;
+        cameraSpline.arcLengthDivisions = 11;
 
         updateAllMaterials();
 
@@ -178,39 +234,62 @@ gltfLoader.load('/models/model-with-spline2.glb',
 window.addEventListener('resize', () =>
 {
     // Update sizes
-    sizes.width = window.innerWidth
-    sizes.height = window.innerHeight
+    sizes.width = window.innerWidth;
+    sizes.height = window.innerHeight;
 
     // Update camera
-    camera.aspect = sizes.width / sizes.height
-    camera.updateProjectionMatrix()
+    camera.aspect = sizes.width / sizes.height;
+    camera.updateProjectionMatrix();
 
     // Update renderer
-    renderer.setSize(sizes.width, sizes.height)
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.setSize(sizes.width, sizes.height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 });
 
 /**
  * Mouse event listener
  */
-let didClick = false;
-window.addEventListener('click', (e) => {
-    console.dir(currentIntersect);
-    console.dir(interactables);
+window.addEventListener('mousemove', (e) => {
     // normalize x from -1 to 1 - left -> right
     mouse.x = ( e.clientX / sizes.width ) * 2 - 1;
+
     // normalize y - need to invert because we want +1 at top of screen, -1 at bottom
     mouse.y = -(e.clientY / sizes.height * 2 - 1);
+});
 
-    didClick = true;
+/**
+ * Show active user modal
+ */
+window.addEventListener('click', () => {
+
+    document.querySelectorAll('.modal').forEach((modal) => {
+        modal.classList.add('fade-out');
+        setTimeout(() => {
+            modal.remove();
+        }, 410);
+    });
+
+    if (currentRayIntersect) {
+        document.getElementById('modal-container').innerHTML = `
+        <div class="modal">
+            <div class="modal-content">
+                <h3>${currentRayIntersect.object.parent.name}</h3>
+                <br>
+                <ul>
+                    <li><b>Make: </b> Apple, Inc.</li>
+                    <li><b>Model #: </b> CCX7633HB${Math.floor(Math.random() * 100)}</li>
+                    <li><b>Year: </b> 2019</li>
+                </ul>
+            </div>
+        </div>
+        `;
+    }
 });
 
 /**
  * Spline movement listener
+ * - Every scroll, increment a number
  */
-let cameraSplinePositionIndex = 0;
-let stepsInteger = 50;
-// Every scroll, increment a number
 canvas.addEventListener('wheel', (e) => {
     const index = -Math.sign(e.deltaY) * 0.1;
 
@@ -226,42 +305,50 @@ canvas.addEventListener('wheel', (e) => {
  */
 let firstRender = true;
 const tick = () => {
+
     // Update camera around spline
     if (camera && cameraSplinePoints.length > 0 && cameraSpline) {
         // get next point on spline
         const equalDistanceValue = cameraSpline.getUtoTmapping(cameraSplinePositionIndex / stepsInteger);
         const camPos = cameraSpline.getPoint(equalDistanceValue);
 
+        if (camPos.x >= -6.15) {
+            if (mainLight.intensity < mainLightMaxIntensity) {
+                mainLight.intensity += 1;
+            }
+            if (hemiLight.intensity < hemiMaxIntensity) {
+                hemiLight.intensity += 1;
+            }
+            if (debugObject.lightMapIntensity < 50) {
+                debugObject.lightMapIntensity += 1.5;
+                updateAllMaterials();
+            }
+        }
+
         if (firstRender) {
             // set camera to first position on first render
-            camera.position.copy(cameraSplinePoints[0]);
+            camera.position.copy(camPos);
+            firstRender = false;
         } else {
-            // move control target to move camera position
-            // we do it this way instead of setting camera.position so we can maintain the orbit controls rotations/pans
+            camera.position.lerp(camPos, 0.4);
             controls.target.set(camPos.x, camPos.y, camPos.z);
         }
+    }
+
+    // Raycaster - detect mouse pointer intersections
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(interactables);
+    currentRayIntersect = false;
+    if (intersects.length > 0) {
+        currentRayIntersect = intersects[0];
     }
 
     // Update controls
     controls.update();
 
-    // Raycaster Test
-    raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObjects(interactables);
-    for(const intersect of intersects) {
-        if (didClick) {
-            alert(intersect.object.parent.name);
-            didClick = false;
-        }
-    }
-
     // Render
-    renderer.render(scene, camera)
-
-    firstRender = false;
+    renderer.render(scene, camera);
 
     // Call tick again on the next frame
-    window.requestAnimationFrame(tick)
-}
-
-
+    window.requestAnimationFrame(tick);
+};

@@ -2,12 +2,14 @@
 {
     margin: 0;
     padding: 0;
+    box-sizing: border-box;
 }
 
 html,
 body
 {
     overflow: hidden;
+    font: 400 16px Helvetica, 'Helvetica' ,'Helvetica Neue', 'sans-serif';
 }
 
 .webgl
@@ -16,4 +18,35 @@ body
     top: 0;
     left: 0;
     outline: none;
+}
+
+.modal {
+    position: fixed;
+    display: flex;
+    top: 1em;
+    left: 1em;
+    opacity: 0;
+    animation: fadeIn 0.4s ease forwards;
+    z-index: 10000;
+}
+.modal.fade-out {
+    animation-direction: reverse;
+    animation-play-state: running;
+}
+
+.modal-content {
+    padding: 2em 2.5em;
+    min-width: 350px;
+    background: rgba(255, 255, 255, 0.75);
+    color: rgb(89 90 94);
+}
+
+.modal-content li {
+    margin-bottom: 1em;
+    font-size: 14px;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
