@@ -55,7 +55,7 @@ cameraFolder.add(camera.position, 'z').min(-100).max(100).step(0.01);
 const cameraSplinePoints = [];
 let cameraSpline = null;
 let cameraSplinePositionIndex = 0;
-let stepsInteger = 50;
+let stepsInteger = 75;
 
 /**
  * Controls
@@ -63,8 +63,6 @@ let stepsInteger = 50;
 const controls = new OrbitControls(camera, canvas);
 controls.maxPolarAngle = Math.PI / 2; // down
 controls.minPolarAngle = Math.PI / 3;  // up
-controls.enableDamping = false;
-controls.dampingFactor = 0.25;
 
 /**
  * Renderer
@@ -77,8 +75,6 @@ renderer.physicallyCorrectLights = true;
 renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ReinhardToneMapping;
 renderer.toneMappingExposure = 0.2;
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 renderer.setSize(sizes.width, sizes.height);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -109,7 +105,7 @@ scene.add(hemiLight);
 const hemiFolder = gui.addFolder('Hemisphere Light');
 hemiFolder.add(hemiLight, 'intensity').min(0).max(100).step(0.1);
 
-const mainLight = new THREE.RectAreaLight(0xffffff, 0, 50, 100);
+const mainLight = new THREE.RectAreaLight(0xd3eae7, 0, 50, 100);
 const mainLightMaxIntensity = 11;
 mainLight.position.set(-5, 9, -16);
 scene.add(mainLight);
@@ -134,14 +130,29 @@ const updateAllMaterials = () =>
             child.material.envMapIntensity = debugObject.envMapIntensity;
             child.material.lightMapIntensity = debugObject.lightMapIntensity;
             child.material.needsUpdate = true;
-            child.castShadow = true;
             child.geometry.buffersNeedUpdate = true;
             child.geometry.uvsNeedUpdate = true;
             child.material.uniformsNeedUpdate = true;
-            child.receiveShadow = true;
         }
     });
 };
+
+/**
+ * Main Light color changer
+ */
+class ColorGUIHelper {
+    constructor(object, prop) {
+        this.object = object;
+        this.prop = prop;
+    }
+    get value() {
+        return `#${this.object[this.prop].getHexString()}`;
+    }
+    set value(hexString) {
+        this.object[this.prop].set(hexString);
+    }
+}
+mainLightFolder.addColor(new ColorGUIHelper(mainLight, 'color'), 'value');
 
 /**
  * Environment map
@@ -155,7 +166,7 @@ newLoader.load( '/textures/3.hdr', function ( texture ) {
     pmremGenerator.dispose();
     environmentMap = envMap;
 });
-debugObject.envMapIntensity = 6.75;
+debugObject.envMapIntensity = 3;
 debugObject.lightMapIntensity = 0;
 gui.add(debugObject, 'envMapIntensity').min(0).max(10).step(0.001).onChange(updateAllMaterials);
 gui.add(debugObject, 'lightMapIntensity').min(0).max(100).step(0.01).onChange(updateAllMaterials);
@@ -182,7 +193,7 @@ gltfLoader.load('/models/model.glb',
             if (child.name.toLowerCase().includes('light_large')) {
                 child.children.forEach((light) => {
                     if (light instanceof THREE.Mesh && light.material instanceof THREE.MeshStandardMaterial) {
-                        light.material.emissiveIntensity = 10;
+                        light.material.emissiveIntensity = 20;
                     }
                 })
             }
@@ -290,14 +301,9 @@ window.addEventListener('click', () => {
  * Spline movement listener
  * - Every scroll, increment a number
  */
+let scrollPositionIndex = 0;
 canvas.addEventListener('wheel', (e) => {
-    const index = -Math.sign(e.deltaY) * 0.1;
-
-    if (cameraSplinePositionIndex + index > stepsInteger || cameraSplinePositionIndex + index < 0) {
-        cameraSplinePositionIndex = 0;
-    } else {
-        cameraSplinePositionIndex += index;
-    }
+    scrollPositionIndex += -Math.sign(e.deltaY) * 0.1;
 });
 
 /**
@@ -309,9 +315,15 @@ const tick = () => {
     // Update camera around spline
     if (camera && cameraSplinePoints.length > 0 && cameraSpline) {
         // get next point on spline
+        if (cameraSplinePositionIndex + scrollPositionIndex > stepsInteger || cameraSplinePositionIndex + scrollPositionIndex < 0) {
+            cameraSplinePositionIndex = 0;
+        } else {
+            cameraSplinePositionIndex = scrollPositionIndex;
+        }
         const equalDistanceValue = cameraSpline.getUtoTmapping(cameraSplinePositionIndex / stepsInteger);
         const camPos = cameraSpline.getPoint(equalDistanceValue);
 
+        // Fade in lights if we are entering building (x >= -6.15)
         if (camPos.x >= -6.15) {
             if (mainLight.intensity < mainLightMaxIntensity) {
                 mainLight.intensity += 1;
@@ -325,11 +337,13 @@ const tick = () => {
             }
         }
 
+        // set camera to first position on first render
         if (firstRender) {
-            // set camera to first position on first render
             camera.position.copy(camPos);
             firstRender = false;
-        } else {
+        }
+        // Move the camera to the next position on the spline
+        else {
             camera.position.lerp(camPos, 0.4);
             controls.target.set(camPos.x, camPos.y, camPos.z);
         }
