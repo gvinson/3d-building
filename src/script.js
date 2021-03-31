@@ -10,7 +10,11 @@ import * as dat from 'dat.gui';
  */
 // Debug
 const gui = new dat.GUI();
-const debugObject = {};
+const debugObject = {
+    cameraType: 'standard',
+    envMapIntensity: 6.69,
+    lightMapIntensity: 0,
+};
 
 // Canvas
 const canvas = document.querySelector('canvas.webgl');
@@ -55,7 +59,8 @@ cameraFolder.add(camera.position, 'z').min(-100).max(100).step(0.01);
 const cameraSplinePoints = [];
 let cameraSpline = null;
 let cameraSplinePositionIndex = 0;
-let stepsInteger = 75;
+let stepsInteger = 100;
+gui.add(debugObject, 'cameraType').options(['standard', 'free']);
 
 /**
  * Controls
@@ -73,8 +78,8 @@ const renderer = new THREE.WebGLRenderer({
 });
 renderer.physicallyCorrectLights = true;
 renderer.outputEncoding = THREE.sRGBEncoding;
-renderer.toneMapping = THREE.ReinhardToneMapping;
-renderer.toneMappingExposure = 0.2;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.035;
 
 renderer.setSize(sizes.width, sizes.height);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -99,14 +104,14 @@ pmremGenerator.compileEquirectangularShader();
 /**
  * Lights
  */
-const hemiLight = new THREE.HemisphereLight(0xffeeb1, 0x080820, 0);
-const hemiMaxIntensity = 33.5;
+const hemiLight = new THREE.HemisphereLight(0xffeeb1, 0x080820, 20);
+const hemiMaxIntensity = 100;
 scene.add(hemiLight);
 const hemiFolder = gui.addFolder('Hemisphere Light');
 hemiFolder.add(hemiLight, 'intensity').min(0).max(100).step(0.1);
 
-const mainLight = new THREE.RectAreaLight(0xd3eae7, 0, 50, 100);
-const mainLightMaxIntensity = 11;
+const mainLight = new THREE.RectAreaLight(0x191919, 0, 50, 100);
+const mainLightMaxIntensity = 100;
 mainLight.position.set(-5, 9, -16);
 scene.add(mainLight);
 mainLight.lookAt( 0, -1000, 0 );
@@ -153,6 +158,8 @@ class ColorGUIHelper {
     }
 }
 mainLightFolder.addColor(new ColorGUIHelper(mainLight, 'color'), 'value');
+hemiFolder.addColor(new ColorGUIHelper(hemiLight, 'groundColor'), 'value');
+hemiFolder.addColor(new ColorGUIHelper(hemiLight, 'color'), 'value');
 
 /**
  * Environment map
@@ -166,8 +173,6 @@ newLoader.load( '/textures/3.hdr', function ( texture ) {
     pmremGenerator.dispose();
     environmentMap = envMap;
 });
-debugObject.envMapIntensity = 3;
-debugObject.lightMapIntensity = 0;
 gui.add(debugObject, 'envMapIntensity').min(0).max(10).step(0.001).onChange(updateAllMaterials);
 gui.add(debugObject, 'lightMapIntensity').min(0).max(100).step(0.01).onChange(updateAllMaterials);
 
@@ -178,19 +183,24 @@ const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 let currentRayIntersect = false;
 const interactables = [];
+let intersects = [];
 
 /**
  * Models
  */
-gltfLoader.load('/models/model.glb',
+gltfLoader.load('/models/Clevyr_Building_E16.glb',
     (gltf) => {
         scene.add(gltf.scene);
-        console.dir(gltf);
 
         scene.traverse((child) => {
 
+            // Fix metalness of logo in entrance
+            if (child.name === 'Clevyr_Logo_V_Secondary006') {
+                child.material.metalness = 0.5;
+            }
+
             // Make lights nice and bright white
-            if (child.name.toLowerCase().includes('light_large')) {
+            else if (child.name.toLowerCase().includes('light_large')) {
                 child.children.forEach((light) => {
                     if (light instanceof THREE.Mesh && light.material instanceof THREE.MeshStandardMaterial) {
                         light.material.emissiveIntensity = 20;
@@ -200,7 +210,7 @@ gltfLoader.load('/models/model.glb',
 
             // Create camera spline
             else if (child.name.includes('Spline_Point')) {
-                cameraSplinePoints.push(child.position);
+                cameraSplinePoints.push(child);
             }
 
             // Create array of objects for click interactions (computers)
@@ -215,6 +225,7 @@ gltfLoader.load('/models/model.glb',
                 if (child instanceof THREE.Group) {
                     child.children.forEach((obj) => {
                         // Get existing `uv` data array
+                        // we need an additional UV for lightmaps
                         if (obj.geometry.getAttribute('uv') && !obj.geometry.getAttribute('uv2')) {
                             const uv1Array = obj.geometry.getAttribute("uv").array;
                             obj.geometry.setAttribute( 'uv2', new THREE.BufferAttribute( uv1Array, 2 ) );
@@ -223,6 +234,7 @@ gltfLoader.load('/models/model.glb',
                     })
                 } else if (child instanceof THREE.Mesh) {
                     // Get existing `uv` data array
+                    // we need an additional UV for lightmaps
                     if (child.geometry.getAttribute('uv') && !child.geometry.getAttribute('uv2')) {
                         const uv1Array = child.geometry.getAttribute("uv").array;
                         child.geometry.setAttribute( 'uv2', new THREE.BufferAttribute( uv1Array, 2 ) );
@@ -232,9 +244,22 @@ gltfLoader.load('/models/model.glb',
             }
         });
 
+        // Order spline points by name cause Blender is dumb
+        const orderedSplinePoints = [];
+        for (let i=1; i<cameraSplinePoints.length + 1; i++) {
+            let index = i < 10 ? "0" + i : i; // append leading 0
+            let foundPoint = cameraSplinePoints.filter((point) => point.name === 'Spline_Point_0' + index);
+
+            if (foundPoint.length > 0) {
+                orderedSplinePoints.push(foundPoint[0].position);
+            }
+        }
+
         // Create camera spline
-        cameraSpline = new THREE.CatmullRomCurve3(cameraSplinePoints);
-        cameraSpline.arcLengthDivisions = 11;
+        cameraSpline = new THREE.CatmullRomCurve3(orderedSplinePoints);
+        cameraSpline.arcLengthDivisions = orderedSplinePoints.length;
+        cameraSpline.type = 'catmullrom';
+        cameraSpline.closed = false;
 
         updateAllMaterials();
 
@@ -277,10 +302,13 @@ window.addEventListener('click', () => {
         modal.classList.add('fade-out');
         setTimeout(() => {
             modal.remove();
+            window.clearInterval(window.tempInterval);
         }, 410);
     });
 
     if (currentRayIntersect) {
+        let currentTemp = Math.floor(Math.random() * 100) + 50;
+
         document.getElementById('modal-container').innerHTML = `
         <div class="modal">
             <div class="modal-content">
@@ -290,10 +318,25 @@ window.addEventListener('click', () => {
                     <li><b>Make: </b> Apple, Inc.</li>
                     <li><b>Model #: </b> CCX7633HB${Math.floor(Math.random() * 100)}</li>
                     <li><b>Year: </b> 2019</li>
+                    <li id="temp" class="green"><b>Temp: </b><span>${currentTemp}</span>&deg;F</li>
                 </ul>
             </div>
         </div>
         `;
+
+        // Random temp stat generator
+        let tempDOM = document.getElementById('temp');
+        window.tempInterval = setInterval(() => {
+            let newTemp = Math.floor(Math.random() * currentTemp) + 100;
+            tempDOM.querySelector('span').innerText = newTemp;
+            if (newTemp < 175) {
+                tempDOM.className = 'green';
+            } else {
+                tempDOM.className = 'red';
+            }
+            currentTemp = newTemp;
+        }, 1000);
+
     }
 });
 
@@ -301,37 +344,42 @@ window.addEventListener('click', () => {
  * Spline movement listener
  * - Every scroll, increment a number
  */
-let scrollPositionIndex = 0;
 canvas.addEventListener('wheel', (e) => {
-    scrollPositionIndex += -Math.sign(e.deltaY) * 0.1;
+    const index = -Math.sign(e.deltaY);
+
+    if (cameraSplinePositionIndex + index > stepsInteger || cameraSplinePositionIndex + index < 0) {
+        cameraSplinePositionIndex = 0;
+    } else {
+        cameraSplinePositionIndex += index;
+    }
+
+    camPosIndex += 0.075;
 });
 
 /**
  * Animate
  */
 let firstRender = true;
+let camPos = null;
+let camPosIndex = 0;
+
 const tick = () => {
 
     // Update camera around spline
-    if (camera && cameraSplinePoints.length > 0 && cameraSpline) {
+    if (cameraSplinePoints.length > 0) {
         // get next point on spline
-        if (cameraSplinePositionIndex + scrollPositionIndex > stepsInteger || cameraSplinePositionIndex + scrollPositionIndex < 0) {
-            cameraSplinePositionIndex = 0;
-        } else {
-            cameraSplinePositionIndex = scrollPositionIndex;
-        }
-        const equalDistanceValue = cameraSpline.getUtoTmapping(cameraSplinePositionIndex / stepsInteger);
-        const camPos = cameraSpline.getPoint(equalDistanceValue);
+        let camPosU = cameraSpline.getUtoTmapping(cameraSplinePositionIndex / stepsInteger, camPosIndex);
+        camPos = cameraSpline.getPoint(camPosU);
 
         // Fade in lights if we are entering building (x >= -6.15)
         if (camPos.x >= -6.15) {
             if (mainLight.intensity < mainLightMaxIntensity) {
-                mainLight.intensity += 1;
+              //  mainLight.intensity += 1;
             }
             if (hemiLight.intensity < hemiMaxIntensity) {
                 hemiLight.intensity += 1;
             }
-            if (debugObject.lightMapIntensity < 50) {
+            if (debugObject.lightMapIntensity < 25.81) {
                 debugObject.lightMapIntensity += 1.5;
                 updateAllMaterials();
             }
@@ -344,14 +392,24 @@ const tick = () => {
         }
         // Move the camera to the next position on the spline
         else {
-            camera.position.lerp(camPos, 0.4);
-            controls.target.set(camPos.x, camPos.y, camPos.z);
+            if (debugObject.cameraType === 'free') {
+                camera.position.copy(camPos);
+                controls.target = new THREE.Vector3()
+                    .addVectors(
+                        camera.position,
+                        camera.getWorldDirection(controls.target)
+                    );
+            }
+            else {
+                controls.target.copy(camPos);
+            }
         }
     }
 
+
     // Raycaster - detect mouse pointer intersections
     raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObjects(interactables);
+    intersects = raycaster.intersectObjects(interactables);
     currentRayIntersect = false;
     if (intersects.length > 0) {
         currentRayIntersect = intersects[0];
