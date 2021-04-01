@@ -4,12 +4,16 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader";
 import * as dat from 'dat.gui';
+import ColorGUIHelper from "./utils/ColorGUIHelper";
+import DimensionGUIHelper from "./utils/DimensionGUIHelper";
+import MinMaxGUIHelper from "./utils/MinMaxGUIHelper";
 
 /**
  * Base
  */
 // Debug
 const gui = new dat.GUI();
+gui.close();
 const debugObject = {
     cameraType: 'standard',
     envMapIntensity: 6.69,
@@ -23,7 +27,8 @@ const canvas = document.querySelector('canvas.webgl');
 const scene = new THREE.Scene();
 const textureLoader = new THREE.TextureLoader();
 const bgTexture = textureLoader.load('/textures/envMap.jpg');
-const lightMap = textureLoader.load('/textures/lightMap.png');
+const lightMap = textureLoader.load('/textures/lightMap2.jpg');
+const lightMapMaxIntensity = 35;
 lightMap.flipY = false;
 lightMap.generateMipmaps = true;
 lightMap.minFilter = THREE.LinearMipMapLinearFilter;
@@ -80,6 +85,8 @@ renderer.physicallyCorrectLights = true;
 renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.035;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 
 renderer.setSize(sizes.width, sizes.height);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -105,21 +112,55 @@ pmremGenerator.compileEquirectangularShader();
  * Lights
  */
 const hemiLight = new THREE.HemisphereLight(0xffeeb1, 0x080820, 20);
-const hemiMaxIntensity = 100;
+const hemiMaxIntensity = 75;
 scene.add(hemiLight);
 const hemiFolder = gui.addFolder('Hemisphere Light');
 hemiFolder.add(hemiLight, 'intensity').min(0).max(100).step(0.1);
+hemiFolder.addColor(new ColorGUIHelper(hemiLight, 'groundColor'), 'value');
+hemiFolder.addColor(new ColorGUIHelper(hemiLight, 'color'), 'value');
 
-const mainLight = new THREE.RectAreaLight(0x191919, 0, 50, 100);
-const mainLightMaxIntensity = 100;
-mainLight.position.set(-5, 9, -16);
+const mainLight = new THREE.DirectionalLight(0x191919, 0);
+const mainLightMaxIntensity = 425;
+mainLight.position.set(1, 2, -4.6);
+mainLight.target = new THREE.Object3D();
+mainLight.target.position.set(mainLight.position.x, -1000, mainLight.position.z);
+mainLight.castShadow = true;
+mainLight.shadow.camera.left = -9.5;
+mainLight.shadow.camera.right = 9.5;
+mainLight.shadow.camera.top = 19;
+mainLight.shadow.camera.bottom = -19;
+mainLight.shadow.mapSize.width = 1024 * 4;
+mainLight.shadow.mapSize.height = 1024 * 4;
+mainLight.shadow.camera.near = 1;
+mainLight.shadow.camera.far = 6;
+scene.add(mainLight.target);
 scene.add(mainLight);
-mainLight.lookAt( 0, -1000, 0 );
+
 const mainLightFolder = gui.addFolder('Entry Light');
 mainLightFolder.add(mainLight.position, 'x').min(-100).max(100);
 mainLightFolder.add(mainLight.position, 'y').min(-100).max(100);
 mainLightFolder.add(mainLight.position, 'z').min(-100).max(100);
-mainLightFolder.add(mainLight, 'intensity').min(0).max(100).step(0.01);
+mainLightFolder.add(mainLight, 'intensity').min(0).max(1000).step(0.01);
+mainLightFolder.addColor(new ColorGUIHelper(mainLight, 'color'), 'value');
+
+function updateCamera() {
+    // update the light target's matrixWorld because it's needed by the helper
+    mainLight.target.updateMatrixWorld();
+    // update the light's shadow camera's projection matrix
+    mainLight.shadow.camera.updateProjectionMatrix();
+}
+updateCamera();
+
+mainLightFolder.add(new DimensionGUIHelper(mainLight.shadow.camera, 'left', 'right'), 'value', 1, 100)
+    .name('width')
+    .onChange(updateCamera);
+mainLightFolder.add(new DimensionGUIHelper(mainLight.shadow.camera, 'bottom', 'top'), 'value', 1, 100)
+    .name('height')
+    .onChange(updateCamera);
+const minMaxGUIHelper = new MinMaxGUIHelper(mainLight.shadow.camera, 'near', 'far', 0.1);
+mainLightFolder.add(minMaxGUIHelper, 'min', 0.1, 50, 0.1).name('near').onChange(updateCamera);
+mainLightFolder.add(minMaxGUIHelper, 'max', 0.1, 50, 0.1).name('far').onChange(updateCamera);
+mainLightFolder.add(mainLight.shadow.camera, 'zoom', 0.01, 1.5, 0.01).onChange(updateCamera);
 
 /**
  * Update all materials
@@ -141,25 +182,6 @@ const updateAllMaterials = () =>
         }
     });
 };
-
-/**
- * Main Light color changer
- */
-class ColorGUIHelper {
-    constructor(object, prop) {
-        this.object = object;
-        this.prop = prop;
-    }
-    get value() {
-        return `#${this.object[this.prop].getHexString()}`;
-    }
-    set value(hexString) {
-        this.object[this.prop].set(hexString);
-    }
-}
-mainLightFolder.addColor(new ColorGUIHelper(mainLight, 'color'), 'value');
-hemiFolder.addColor(new ColorGUIHelper(hemiLight, 'groundColor'), 'value');
-hemiFolder.addColor(new ColorGUIHelper(hemiLight, 'color'), 'value');
 
 /**
  * Environment map
@@ -190,9 +212,15 @@ let intersects = [];
  */
 gltfLoader.load('/models/Clevyr_Building_E16.glb',
     (gltf) => {
-        scene.add(gltf.scene);
-
-        scene.traverse((child) => {
+        gltf.scene.traverse((child) => {
+            // Enable shadows
+            if (child instanceof THREE.Mesh) {
+                if (!child.name.includes('Floor')) {
+                    child.castShadow = true;
+                } else {
+                    child.receiveShadow = true;
+                }
+            }
 
             // Fix metalness of logo in entrance
             if (child.name === 'Clevyr_Logo_V_Secondary006') {
@@ -243,6 +271,9 @@ gltfLoader.load('/models/Clevyr_Building_E16.glb',
                 }
             }
         });
+
+        // Add model to scene
+        scene.add(gltf.scene);
 
         // Order spline points by name cause Blender is dumb
         const orderedSplinePoints = [];
@@ -369,17 +400,22 @@ const tick = () => {
     if (cameraSplinePoints.length > 0) {
         // get next point on spline
         let camPosU = cameraSpline.getUtoTmapping(cameraSplinePositionIndex / stepsInteger, camPosIndex);
+        if (isNaN(camPosU)) {
+            camPosU = 0;
+            camPos = null;
+            camPosIndex = 0;
+        }
         camPos = cameraSpline.getPoint(camPosU);
 
         // Fade in lights if we are entering building (x >= -6.15)
         if (camPos.x >= -6.15) {
             if (mainLight.intensity < mainLightMaxIntensity) {
-              //  mainLight.intensity += 1;
+                mainLight.intensity += 10;
             }
             if (hemiLight.intensity < hemiMaxIntensity) {
-                hemiLight.intensity += 1;
+               hemiLight.intensity += 2;
             }
-            if (debugObject.lightMapIntensity < 25.81) {
+            if (debugObject.lightMapIntensity < lightMapMaxIntensity) {
                 debugObject.lightMapIntensity += 1.5;
                 updateAllMaterials();
             }
